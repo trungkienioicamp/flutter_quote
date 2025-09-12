@@ -113,3 +113,13 @@ const kCategories = <Category>[
     keywords: ['persevere', 'perseverance', 'determination', 'grit', 'persist', 'endure'],
   ),
 ];
+
+Category? findCategoryByName(String name) {
+  try {
+    return kCategories.firstWhere(
+      (c) => c.name.toLowerCase() == name.trim().toLowerCase(),
+    );
+  } catch (_) {
+    return null;
+  }
+}

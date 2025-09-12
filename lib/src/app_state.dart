@@ -6,12 +6,16 @@ import 'quote_service.dart';
 class AppState extends ChangeNotifier {
   static const _kBgColor = 'bg_color';
   static const _kFavs = 'favorites_json';
+  static const _kLastCategory = 'last_category';
 
   Color color;
 
-  // Keep a list for rendering order + a set of keys for quick membership.
+  // favourites
   final List<Quote> _favorites = [];
   final Set<String> _favKeys = {};
+
+  // last used category
+  String? _lastCategoryName;
 
   AppState._({
     required this.color,
@@ -20,7 +24,6 @@ class AppState extends ChangeNotifier {
   /// Create with defaults and load persisted state asynchronously.
   factory AppState.init() {
     final s = AppState._(color: const Color(0xFFFFF3E0));
-    // load later to not block UI startup
     Future.microtask(() => s._load());
     return s;
   }
@@ -31,6 +34,8 @@ class AppState extends ChangeNotifier {
     if (colorInt != null) {
       color = Color(colorInt);
     }
+    _lastCategoryName = prefs.getString(_kLastCategory);
+
     final favStr = prefs.getString(_kFavs);
     if (favStr != null && favStr.isNotEmpty) {
       try {
@@ -65,14 +70,25 @@ class AppState extends ChangeNotifier {
     await prefs.setString(_kFavs, jsonEncode(data));
   }
 
-  // PUBLIC API
+  Future<void> _saveLastCategory() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_lastCategoryName == null) {
+      await prefs.remove(_kLastCategory);
+    } else {
+      await prefs.setString(_kLastCategory, _lastCategoryName!);
+    }
+  }
 
+  // === PUBLIC API ===
+
+  // Background color
   void setColor(Color c) {
     color = c;
     _saveColor();
     notifyListeners();
   }
 
+  // Favourites
   List<Quote> get favorites => List.unmodifiable(_favorites);
 
   bool isFavorite(Quote q) => _favKeys.contains(_keyFor(q));
@@ -80,7 +96,6 @@ class AppState extends ChangeNotifier {
   void toggleFavorite(Quote q) {
     final k = _keyFor(q);
     if (_favKeys.contains(k)) {
-      // remove
       _favKeys.remove(k);
       _favorites.removeWhere((e) => _keyFor(e) == k);
     } else {
@@ -91,12 +106,25 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // CONTRAST HELPERS
+  // Last used category
+  String? get lastCategoryName => _lastCategoryName;
 
+  void setLastCategory(String name) {
+    _lastCategoryName = name;
+    _saveLastCategory();
+    notifyListeners();
+  }
+
+  void clearLastCategory() {
+    _lastCategoryName = null;
+    _saveLastCategory();
+    notifyListeners();
+  }
+
+  // Contrast helpers
   bool get isDark {
     final lum = color.computeLuminance(); // W3C relative luminance
     return lum < 0.5;
-    // (If you later add images again, branch here)
   }
 
   Color get foreground => isDark ? Colors.white : Colors.black87;

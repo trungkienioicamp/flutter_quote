@@ -61,7 +61,7 @@ class _RootScreenState extends State<RootScreen> {
     ];
 
     return ThemedScaffold(
-      title: ['Home', 'Category', 'Favourite', 'Setting'][_index],
+      title: ['', '', '', ''][_index],
       body: IndexedStack(index: _index, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
@@ -93,7 +93,7 @@ class _RootScreenState extends State<RootScreen> {
   }
 }
 
-/// Reusable quote viewer page.
+/// Reusable quote viewer page with swipe up/down.
 /// If [category] is null => Home (Random).
 class QuotePage extends StatefulWidget {
   final QuoteService service;
@@ -112,40 +112,90 @@ class QuotePage extends StatefulWidget {
 }
 
 class _QuotePageState extends State<QuotePage> {
-  Quote? _quote;
+  final List<Quote> _history = [];
+  int _cursor = -1; // index of current quote in history
   bool _loading = true;
   String? _hint;
+  int _swipeDir = 1; // 1 = up/next, -1 = down/prev
+
+  Quote? get _current =>
+      (_cursor >= 0 && _cursor < _history.length) ? _history[_cursor] : null;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    // If page opened with a category, persist it as "last used"
+    if (widget.category != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<AppState>().setLastCategory(widget.category!.name);
+      });
+    }
+    _loadNext(initial: true);
   }
 
-  Future<void> _load() async {
+  Future<void> _loadNext({bool initial = false}) async {
     setState(() {
       _loading = true;
-      _hint = null;
+      if (!initial) _hint = null;
     });
+
     try {
-      final q = await widget.service.next(widget.category);
-      setState(() => _quote = q);
+      // If we have a forward item in history (user had swiped back), go forward without fetching
+      if (_cursor < _history.length - 1) {
+        setState(() {
+          _cursor++;
+        });
+      } else {
+        final q = await widget.service.next(widget.category);
+        setState(() {
+          _history.add(q);
+          _cursor = _history.length - 1;
+        });
+      }
     } on Cooldown catch (c) {
       setState(() => _hint = 'Easy 🙂 Try again in ~${c.remaining.inSeconds.clamp(1, 9)}s');
-      // keep current quote
     } catch (_) {
+      // Network issue: use local fallback
+      final q = widget.service.localQuote(widget.category);
       setState(() {
+        _history.add(q);
+        _cursor = _history.length - 1;
         _hint = 'Network issue — showing a local quote.';
-        _quote = widget.service.localQuote(widget.category);
       });
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  void _goPrev() {
+    if (_cursor > 0) {
+      setState(() {
+        _cursor--;
+      });
+    } else {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(const SnackBar(content: Text('No previous quote')));
+    }
+  }
+
+  void _onVerticalEnd(DragEndDetails d) {
+    final vy = d.primaryVelocity ?? 0;
+    if (vy < -200) {
+      // swipe up -> next
+      _swipeDir = 1;
+      _loadNext();
+    } else if (vy > 200) {
+      // swipe down -> prev
+      _swipeDir = -1;
+      _goPrev();
+    }
+  }
+
   void _shareCurrent() async {
-    if (_quote == null) return;
-    final text = '“${_quote!.content}” — ${_quote!.author}';
+    final q = _current;
+    if (q == null) return;
+    final text = '“${q.content}” — ${q.author}';
     try {
       await Share.share(text, subject: 'Quote');
     } catch (_) {
@@ -157,8 +207,9 @@ class _QuotePageState extends State<QuotePage> {
   }
 
   void _toggleFavorite(AppState app) {
-    if (_quote == null) return;
-    app.toggleFavorite(_quote!);
+    final q = _current;
+    if (q == null) return;
+    app.toggleFavorite(q);
   }
 
   @override
@@ -166,29 +217,37 @@ class _QuotePageState extends State<QuotePage> {
     final title = widget.title ?? (widget.category?.name ?? 'Quotes');
     final app = context.watch<AppState>();
     final textColor = app.foreground;
-    final isFav = _quote != null && app.isFavorite(_quote!);
+    final isFav = _current != null && app.isFavorite(_current!);
+
+    final bodyChild = _loading
+        ? const Center(child: CircularProgressIndicator())
+        : _current == null
+            ? _EmptyState(onRetry: _loadNext)
+            : _QuoteView(
+                key: ValueKey('q$_cursor'),
+                quote: _current!,
+                hint: _hint,
+                textColor: textColor,
+                onShare: _shareCurrent,
+                isFavorite: isFav,
+                onToggleFavorite: () => _toggleFavorite(app),
+              );
 
     return ThemedScaffold(
       title: title,
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 250),
-        child: _loading
-            ? const Center(child: CircularProgressIndicator())
-            : _quote == null
-                ? _EmptyState(onRetry: _load)
-                : _QuoteView(
-                    quote: _quote!,
-                    hint: _hint,
-                    textColor: textColor,
-                    onShare: _shareCurrent,
-                    isFavorite: isFav,
-                    onToggleFavorite: () => _toggleFavorite(app),
-                  ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _loading ? null : _load,
-        icon: const Icon(Icons.shuffle),
-        label: const Text('New'),
+      body: GestureDetector(
+        onVerticalDragEnd: _onVerticalEnd,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          transitionBuilder: (child, anim) {
+            final beginOffset = Offset(0, _swipeDir == 1 ? 1 : -1);
+            final tween = Tween<Offset>(begin: beginOffset, end: Offset.zero)
+                .chain(CurveTween(curve: Curves.easeOutCubic))
+                .animate(anim);
+            return SlideTransition(position: tween, child: child);
+          },
+          child: bodyChild,
+        ),
       ),
     );
   }
@@ -200,61 +259,111 @@ class CategoryTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Category grid (no duplicate header anymore)
-    final textColor = context.select<AppState, Color>((s) => s.foreground);
+    final app = context.watch<AppState>();
+    final textColor = app.foreground;
+
+    final last = app.lastCategoryName != null
+        ? findCategoryByName(app.lastCategoryName!)
+        : null;
+
     return ThemedScaffold(
       title: 'Pick a Category',
-      body: GridView.builder(
+      body: ListView(
         padding: const EdgeInsets.all(16),
-        itemCount: kCategories.length,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          childAspectRatio: 4 / 3,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-        ),
-        itemBuilder: (context, i) {
-          final c = kCategories[i];
-          return InkWell(
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => QuotePage(
-                    service: service,
-                    category: c,
-                    title: c.name,
+        children: [
+          if (last != null) ...[
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => QuotePage(
+                      service: service,
+                      category: last,
+                      title: last.name,
+                    ),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(16),
+              child: Ink(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.history, color: textColor),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Last used: ${last.name}',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor),
+                      ),
+                    ),
+                    Icon(Icons.arrow_forward, color: textColor),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          GridView.builder(
+            physics: const NeverScrollableScrollPhysics(),
+            shrinkWrap: true,
+            itemCount: kCategories.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 4 / 3,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemBuilder: (context, i) {
+              final c = kCategories[i];
+              return InkWell(
+                onTap: () {
+                  // persist last category
+                  context.read<AppState>().setLastCategory(c.name);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => QuotePage(
+                        service: service,
+                        category: c,
+                        title: c.name,
+                      ),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(20),
+                child: Ink(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: kElevationToShadow[1],
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(c.icon, size: 40, color: textColor),
+                      const SizedBox(height: 8),
+                      Text(c.name,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(color: textColor)),
+                      const SizedBox(height: 4),
+                      Text(c.subtitle,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: textColor.withOpacity(0.8))),
+                    ],
                   ),
                 ),
               );
             },
-            borderRadius: BorderRadius.circular(20),
-            child: Ink(
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.04),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: kElevationToShadow[1],
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(c.icon, size: 40, color: textColor),
-                  const SizedBox(height: 8),
-                  Text(c.name,
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleMedium
-                          ?.copyWith(color: textColor)),
-                  const SizedBox(height: 4),
-                  Text(c.subtitle,
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(color: textColor.withOpacity(0.8))),
-                ],
-              ),
-            ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -269,6 +378,7 @@ class _QuoteView extends StatelessWidget {
   final bool isFavorite;
 
   const _QuoteView({
+    super.key,
     required this.quote,
     this.hint,
     required this.textColor,
@@ -313,9 +423,9 @@ class _QuoteView extends StatelessWidget {
               style: theme.textTheme.titleMedium?.copyWith(color: textColor),
             ),
             const SizedBox(height: 8),
-            Text('source: ${quote.source}',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: textColor.withOpacity(0.8))),
+            // Text('source: ${quote.source}',
+            //     style: theme.textTheme.bodySmall
+            //         ?.copyWith(color: textColor.withOpacity(0.8))),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -365,7 +475,7 @@ class _EmptyState extends StatelessWidget {
                     ?.copyWith(color: textColor)),
             const SizedBox(height: 8),
             Text(
-              'Tap below to try again — we’ll use online sources or fall back to local quotes.',
+              'Swipe up for next, down for previous.',
               textAlign: TextAlign.center,
               style: TextStyle(color: textColor),
             ),
@@ -484,6 +594,25 @@ class SettingsPage extends StatelessWidget {
             colors: kWarmColors,
             selected: app.color,
             onPick: (c) => context.read<AppState>().setColor(c),
+          ),
+          const SizedBox(height: 28),
+          Text('Last used category',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: app.foreground)),
+          const SizedBox(height: 8),
+          Text(
+            app.lastCategoryName ?? 'None',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: app.foreground),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              FilledButton.tonal(
+                onPressed: app.lastCategoryName == null
+                    ? null
+                    : () => context.read<AppState>().clearLastCategory(),
+                child: const Text('Clear'),
+              ),
+            ],
           ),
           const SizedBox(height: 28),
           Text('Preview',
