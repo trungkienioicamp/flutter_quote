@@ -61,7 +61,8 @@ class _RootScreenState extends State<RootScreen> {
     ];
 
     return ThemedScaffold(
-      title: ['', '', '', ''][_index],
+      // no title -> no AppBar
+      title: null,
       body: IndexedStack(index: _index, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
@@ -93,7 +94,7 @@ class _RootScreenState extends State<RootScreen> {
   }
 }
 
-/// Reusable quote viewer page with swipe up/down.
+/// Reusable quote viewer page with swipe up/down and a one-time hint.
 /// If [category] is null => Home (Random).
 class QuotePage extends StatefulWidget {
   final QuoteService service;
@@ -118,18 +119,37 @@ class _QuotePageState extends State<QuotePage> {
   String? _hint;
   int _swipeDir = 1; // 1 = up/next, -1 = down/prev
 
+  // --- one-time swipe hint state ---
+  bool _showSwipeHint = false;
+  double _hintOpacity = 1.0;
+
   Quote? get _current =>
       (_cursor >= 0 && _cursor < _history.length) ? _history[_cursor] : null;
 
   @override
   void initState() {
     super.initState();
-    // If page opened with a category, persist it as "last used"
+    // persist last used category (if any)
     if (widget.category != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         context.read<AppState>().setLastCategory(widget.category!.name);
       });
     }
+    // show swipe hint if not yet seen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final app = context.read<AppState>();
+      if (!app.hintSeen) {
+        setState(() {
+          _showSwipeHint = true;
+          _hintOpacity = 1.0;
+        });
+        // auto-fade after a short delay
+        Future.delayed(const Duration(seconds: 3), () {
+          _hideSwipeHint(markSeen: true);
+        });
+      }
+    });
+
     _loadNext(initial: true);
   }
 
@@ -140,7 +160,7 @@ class _QuotePageState extends State<QuotePage> {
     });
 
     try {
-      // If we have a forward item in history (user had swiped back), go forward without fetching
+      // If user had gone back, allow forward navigation through history
       if (_cursor < _history.length - 1) {
         setState(() {
           _cursor++;
@@ -155,7 +175,6 @@ class _QuotePageState extends State<QuotePage> {
     } on Cooldown catch (c) {
       setState(() => _hint = 'Easy 🙂 Try again in ~${c.remaining.inSeconds.clamp(1, 9)}s');
     } catch (_) {
-      // Network issue: use local fallback
       final q = widget.service.localQuote(widget.category);
       setState(() {
         _history.add(q);
@@ -180,6 +199,9 @@ class _QuotePageState extends State<QuotePage> {
   }
 
   void _onVerticalEnd(DragEndDetails d) {
+    // first swipe hides the hint immediately
+    _hideSwipeHint(markSeen: true);
+
     final vy = d.primaryVelocity ?? 0;
     if (vy < -200) {
       // swipe up -> next
@@ -190,6 +212,16 @@ class _QuotePageState extends State<QuotePage> {
       _swipeDir = -1;
       _goPrev();
     }
+  }
+
+  void _hideSwipeHint({bool markSeen = false}) {
+    if (!_showSwipeHint) return;
+    setState(() => _hintOpacity = 0.0);
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      setState(() => _showSwipeHint = false);
+      if (markSeen) context.read<AppState>().markHintSeen();
+    });
   }
 
   void _shareCurrent() async {
@@ -214,7 +246,6 @@ class _QuotePageState extends State<QuotePage> {
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.title ?? (widget.category?.name ?? 'Quotes');
     final app = context.watch<AppState>();
     final textColor = app.foreground;
     final isFav = _current != null && app.isFavorite(_current!);
@@ -233,21 +264,73 @@ class _QuotePageState extends State<QuotePage> {
                 onToggleFavorite: () => _toggleFavorite(app),
               );
 
+    // bubble bg: faint contrast against current background
+    final bubbleBg = app.isDark
+        ? Colors.white.withOpacity(0.12)
+        : Colors.black.withOpacity(0.12);
+
     return ThemedScaffold(
-      title: title,
-      body: GestureDetector(
-        onVerticalDragEnd: _onVerticalEnd,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          transitionBuilder: (child, anim) {
-            final beginOffset = Offset(0, _swipeDir == 1 ? 1 : -1);
-            final tween = Tween<Offset>(begin: beginOffset, end: Offset.zero)
-                .chain(CurveTween(curve: Curves.easeOutCubic))
-                .animate(anim);
-            return SlideTransition(position: tween, child: child);
-          },
-          child: bodyChild,
-        ),
+      // no title -> no AppBar
+      title: null,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          GestureDetector(
+            onVerticalDragEnd: _onVerticalEnd,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (child, anim) {
+                final beginOffset = Offset(0, _swipeDir == 1 ? 1 : -1);
+                final tween = Tween<Offset>(begin: beginOffset, end: Offset.zero)
+                    .chain(CurveTween(curve: Curves.easeOutCubic))
+                    .animate(anim);
+                return SlideTransition(position: tween, child: child);
+              },
+              child: bodyChild,
+            ),
+          ),
+          if (_showSwipeHint)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: AnimatedOpacity(
+                  opacity: _hintOpacity,
+                  duration: const Duration(milliseconds: 350),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: bubbleBg,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: app.isDark
+                            ? Colors.white.withOpacity(0.25)
+                            : Colors.black.withOpacity(0.25),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.arrow_downward, size: 18, color: textColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Swipe down for previous',
+                          style: TextStyle(color: textColor),
+                        ),
+                        const SizedBox(width: 12),
+                        Icon(Icons.arrow_upward, size: 18, color: textColor),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Swipe up for next',
+                          style: TextStyle(color: textColor),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -267,7 +350,8 @@ class CategoryTab extends StatelessWidget {
         : null;
 
     return ThemedScaffold(
-      title: 'Pick a Category',
+      // no title -> no AppBar
+      title: null,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -322,7 +406,6 @@ class CategoryTab extends StatelessWidget {
               final c = kCategories[i];
               return InkWell(
                 onTap: () {
-                  // persist last category
                   context.read<AppState>().setLastCategory(c.name);
                   Navigator.of(context).push(
                     MaterialPageRoute(
@@ -422,10 +505,6 @@ class _QuoteView extends StatelessWidget {
               textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium?.copyWith(color: textColor),
             ),
-            const SizedBox(height: 8),
-            // Text('source: ${quote.source}',
-            //     style: theme.textTheme.bodySmall
-            //         ?.copyWith(color: textColor.withOpacity(0.8))),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -503,7 +582,8 @@ class FavoritesPage extends StatelessWidget {
     final textColor = app.foreground;
 
     return ThemedScaffold(
-      title: 'Favourites',
+      // no title -> no AppBar
+      title: null,
       body: items.isEmpty
           ? Center(
               child: Text(
@@ -583,7 +663,8 @@ class SettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     return ThemedScaffold(
-      title: 'Settings',
+      // no title -> no AppBar
+      title: null,
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -621,7 +702,8 @@ class SettingsPage extends StatelessWidget {
           SizedBox(
             height: 180,
             child: ThemedScaffold(
-              title: 'Preview',
+              // no title in preview either
+              title: null,
               body: Center(
                 child: Text(
                   '“The only way out is through.”\n— Robert Frost',
