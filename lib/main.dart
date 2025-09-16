@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
@@ -94,7 +96,7 @@ class _RootScreenState extends State<RootScreen> {
   }
 }
 
-/// Reusable quote viewer page with swipe up/down and a one-time hint.
+/// Reusable quote viewer page with swipe gestures and navigation controls.
 /// If [category] is null => Home (Random).
 class QuotePage extends StatefulWidget {
   final QuoteService service;
@@ -119,10 +121,6 @@ class _QuotePageState extends State<QuotePage> {
   String? _hint;
   int _swipeDir = 1; // 1 = up/next, -1 = down/prev
 
-  // --- one-time swipe hint state ---
-  bool _showSwipeHint = false;
-  double _hintOpacity = 1.0;
-
   Quote? get _current =>
       (_cursor >= 0 && _cursor < _history.length) ? _history[_cursor] : null;
 
@@ -135,28 +133,20 @@ class _QuotePageState extends State<QuotePage> {
         context.read<AppState>().setLastCategory(widget.category!.name);
       });
     }
-    // show swipe hint if not yet seen
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final app = context.read<AppState>();
-      if (!app.hintSeen) {
-        setState(() {
-          _showSwipeHint = true;
-          _hintOpacity = 1.0;
-        });
-        // auto-fade after a short delay
-        Future.delayed(const Duration(seconds: 3), () {
-          _hideSwipeHint(markSeen: true);
-        });
-      }
+    Future.microtask(() async {
+      await widget.service.prefetch(widget.category, desired: 10);
+      if (!mounted) return;
+      _loadNext(initial: true);
     });
-
-    _loadNext(initial: true);
   }
 
   Future<void> _loadNext({bool initial = false}) async {
     setState(() {
       _loading = true;
-      if (!initial) _hint = null;
+      if (!initial) {
+        _hint = null;
+        _swipeDir = 1;
+      }
     });
 
     try {
@@ -189,6 +179,7 @@ class _QuotePageState extends State<QuotePage> {
   void _goPrev() {
     if (_cursor > 0) {
       setState(() {
+        _swipeDir = -1;
         _cursor--;
       });
     } else {
@@ -199,29 +190,14 @@ class _QuotePageState extends State<QuotePage> {
   }
 
   void _onVerticalEnd(DragEndDetails d) {
-    // first swipe hides the hint immediately
-    _hideSwipeHint(markSeen: true);
-
     final vy = d.primaryVelocity ?? 0;
     if (vy < -200) {
       // swipe up -> next
-      _swipeDir = 1;
       _loadNext();
     } else if (vy > 200) {
       // swipe down -> prev
-      _swipeDir = -1;
       _goPrev();
     }
-  }
-
-  void _hideSwipeHint({bool markSeen = false}) {
-    if (!_showSwipeHint) return;
-    setState(() => _hintOpacity = 0.0);
-    Future.delayed(const Duration(milliseconds: 350), () {
-      if (!mounted) return;
-      setState(() => _showSwipeHint = false);
-      if (markSeen) context.read<AppState>().markHintSeen();
-    });
   }
 
   void _shareCurrent() async {
@@ -263,12 +239,6 @@ class _QuotePageState extends State<QuotePage> {
                 isFavorite: isFav,
                 onToggleFavorite: () => _toggleFavorite(app),
               );
-
-    // bubble bg: faint contrast against current background
-    final bubbleBg = app.isDark
-        ? Colors.white.withOpacity(0.12)
-        : Colors.black.withOpacity(0.12);
-
     return ThemedScaffold(
       // no title -> no AppBar
       title: null,
@@ -289,47 +259,33 @@ class _QuotePageState extends State<QuotePage> {
               child: bodyChild,
             ),
           ),
-          if (_showSwipeHint)
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 20),
-                child: AnimatedOpacity(
-                  opacity: _hintOpacity,
-                  duration: const Duration(milliseconds: 350),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: bubbleBg,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: app.isDark
-                            ? Colors.white.withOpacity(0.25)
-                            : Colors.black.withOpacity(0.25),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.arrow_downward, size: 18, color: textColor),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Swipe down for previous',
-                          style: TextStyle(color: textColor),
-                        ),
-                        const SizedBox(width: 12),
-                        Icon(Icons.arrow_upward, size: 18, color: textColor),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Swipe up for next',
-                          style: TextStyle(color: textColor),
-                        ),
-                      ],
-                    ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 24),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed:
+                        (!_loading && _cursor > 0) ? _goPrev : null,
+                    icon: const Icon(Icons.arrow_back),
+                    label: const Text('Prev'),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            _loadNext();
+                          },
+                    icon: const Icon(Icons.arrow_forward),
+                    label: const Text('Next'),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );
@@ -358,6 +314,7 @@ class CategoryTab extends StatelessWidget {
           if (last != null) ...[
             InkWell(
               onTap: () {
+                unawaited(service.prefetch(last, desired: 10));
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => QuotePage(
@@ -407,6 +364,7 @@ class CategoryTab extends StatelessWidget {
               return InkWell(
                 onTap: () {
                   context.read<AppState>().setLastCategory(c.name);
+                  unawaited(service.prefetch(c, desired: 10));
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => QuotePage(
@@ -554,7 +512,7 @@ class _EmptyState extends StatelessWidget {
                     ?.copyWith(color: textColor)),
             const SizedBox(height: 8),
             Text(
-              'Swipe up for next, down for previous.',
+              'Use the arrows below to browse quotes.',
               textAlign: TextAlign.center,
               style: TextStyle(color: textColor),
             ),

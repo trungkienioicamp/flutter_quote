@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
@@ -14,22 +15,70 @@ class Quote {
 class QuoteService {
   final _rng = Random();
   final Map<String, List<Quote>> _poolByKey = {};
+  final Map<String, Future<void>> _ongoingFetch = {};
 
   // Simple global cooldown to avoid rapid-fire 429
   DateTime _nextAllowed = DateTime.fromMillisecondsSinceEpoch(0);
   final Duration _minInterval = const Duration(seconds: 2);
 
   Future<Quote> next(Category? category) async {
-    final now = DateTime.now();
-    if (now.isBefore(_nextAllowed)) {
-      throw Cooldown(_nextAllowed.difference(now));
-    }
-    _nextAllowed = now.add(_minInterval);
-
     final key = category?.name ?? '_general';
     final pool = _poolByKey.putIfAbsent(key, () => []);
 
-    if (pool.isNotEmpty) return pool.removeAt(0);
+    if (pool.isNotEmpty) {
+      final quote = pool.removeAt(0);
+      unawaited(_ensurePrefetch(key, category, pool, desired: 5, awaitCompletion: false));
+      return quote;
+    }
+
+    await _ensurePrefetch(key, category, pool, desired: 1, awaitCompletion: true);
+
+    if (pool.isNotEmpty) {
+      final quote = pool.removeAt(0);
+      unawaited(_ensurePrefetch(key, category, pool, desired: 5, awaitCompletion: false));
+      return quote;
+    }
+
+    // Local fallback (filtered by category keywords)
+    return localQuote(category);
+  }
+
+  Future<void> prefetch(Category? category, {int desired = 10}) async {
+    final key = category?.name ?? '_general';
+    final pool = _poolByKey.putIfAbsent(key, () => []);
+    await _ensurePrefetch(key, category, pool,
+        desired: desired, awaitCompletion: true);
+  }
+
+  Future<void> _ensurePrefetch(String key, Category? category, List<Quote> pool,
+      {required int desired, required bool awaitCompletion}) async {
+    if (pool.length >= desired) return;
+
+    final inFlight = _ongoingFetch[key];
+    if (inFlight != null) {
+      if (awaitCompletion) await inFlight;
+      return;
+    }
+
+    final future = _fetchMore(category, pool);
+    _ongoingFetch[key] = future;
+    future.whenComplete(() {
+      if (identical(_ongoingFetch[key], future)) {
+        _ongoingFetch.remove(key);
+      }
+    });
+
+    if (awaitCompletion) {
+      await future;
+    }
+  }
+
+  Future<void> _fetchMore(Category? category, List<Quote> pool) async {
+    final wait = _nextAllowed.difference(DateTime.now());
+    if (wait > Duration.zero) {
+      await Future.delayed(wait);
+    }
+    _nextAllowed = DateTime.now().add(_minInterval);
 
     // Refill order:
     // - General: ZenQuotes (50)
@@ -41,13 +90,8 @@ class QuoteService {
         await _refillFromQuotable(category, pool);
       }
     } catch (_) {
-      // ignore; we have local fallback below
+      // ignore; we have local fallback
     }
-
-    if (pool.isNotEmpty) return pool.removeAt(0);
-
-    // Local fallback (filtered by category keywords)
-    return localQuote(category);
   }
 
   Quote localQuote(Category? category) {

@@ -7,7 +7,6 @@ class AppState extends ChangeNotifier {
   static const _kBgColor = 'bg_color';
   static const _kFavs = 'favorites_json';
   static const _kLastCategory = 'last_category';
-  static const _kHintSeen = 'hint_seen';
 
   Color color;
 
@@ -17,9 +16,6 @@ class AppState extends ChangeNotifier {
 
   // last used category
   String? _lastCategoryName;
-
-  // swipe hint
-  bool _hintSeen = false;
 
   AppState._({
     required this.color,
@@ -38,8 +34,6 @@ class AppState extends ChangeNotifier {
     if (colorInt != null) color = Color(colorInt);
 
     _lastCategoryName = prefs.getString(_kLastCategory);
-    _hintSeen = prefs.getBool(_kHintSeen) ?? false;
-
     final favStr = prefs.getString(_kFavs);
     if (favStr != null && favStr.isNotEmpty) {
       try {
@@ -83,11 +77,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> _saveHintSeen() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_kHintSeen, _hintSeen);
-  }
-
   // === PUBLIC API ===
 
   // Background color
@@ -127,16 +116,6 @@ class AppState extends ChangeNotifier {
   void clearLastCategory() {
     _lastCategoryName = null;
     _saveLastCategory();
-    notifyListeners();
-  }
-
-  // Swipe hint
-  bool get hintSeen => _hintSeen;
-
-  void markHintSeen() {
-    if (_hintSeen) return;
-    _hintSeen = true;
-    _saveHintSeen();
     notifyListeners();
   }
 
