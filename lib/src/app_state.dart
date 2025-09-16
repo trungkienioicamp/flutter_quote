@@ -27,7 +27,7 @@ class AppState extends ChangeNotifier {
 
   /// Create with defaults and load persisted state asynchronously.
   factory AppState.init() {
-    final s = AppState._(color: const Color(0xFFFFF3E0));
+    final s = AppState._(color: Colors.black);
     Future.microtask(() => s._load());
     return s;
   }

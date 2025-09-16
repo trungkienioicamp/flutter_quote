@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 /// A curated palette of warm/nice colors (includes dark & light options)
 const List<Color> kWarmColors = [
   Color(0xFFFFF7EC), // extra soft cream
-  Color(0xFFFFF3E0), // soft cream (default)
+  Color(0xFFFFF3E0), // soft cream
   Color(0xFFFFE0B2), // light amber
   Color(0xFFFFCC80),
   Color(0xFFFFB74D),
@@ -18,6 +18,6 @@ const List<Color> kWarmColors = [
   Color(0xFF607D8B), // blue gray
   Color(0xFF37474F), // darker slate
   Color(0xFF263238), // nearly black (dark)
-  Color(0xFF000000), // pure black
+  Color(0xFF000000), // pure black (default)
   Color(0xFFFFFFFF), // pure white
 ];
