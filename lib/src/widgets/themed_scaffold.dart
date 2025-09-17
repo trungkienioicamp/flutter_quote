@@ -50,7 +50,10 @@ class ThemedScaffold extends StatelessWidget {
                   iconTheme: IconThemeData(color: fg),
                   actionsIconTheme: IconThemeData(color: fg),
                 ),
-          body: body,
+          body: Padding(
+            padding: const EdgeInsets.only(top: 24),
+            child: body,
+          ),
           bottomNavigationBar: bottomNavigationBar,
           floatingActionButton: floatingActionButton,
         ),
