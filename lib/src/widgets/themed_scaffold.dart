@@ -6,16 +6,26 @@ import '../app_state.dart';
 /// and adapts foreground colors automatically.
 class ThemedScaffold extends StatelessWidget {
   final String? title;
+  final Widget? titleWidget;
   final Widget body;
   final Widget? bottomNavigationBar;
   final Widget? floatingActionButton;
+  final List<Widget>? actions;
+  final Widget? leading;
+  final PreferredSizeWidget? appBarBottom;
+  final bool? centerTitle;
 
   const ThemedScaffold({
     super.key,
     this.title,
+    this.titleWidget,
     required this.body,
     this.bottomNavigationBar,
     this.floatingActionButton,
+    this.actions,
+    this.leading,
+    this.appBarBottom,
+    this.centerTitle,
   });
 
   @override
@@ -40,13 +50,21 @@ class ThemedScaffold extends StatelessWidget {
         // Foreground scaffold
         Scaffold(
           backgroundColor: Colors.transparent,
-          appBar: title == null
+          appBar: title == null && titleWidget == null && actions == null && leading == null && appBarBottom == null
               ? null
               : AppBar(
                   backgroundColor: appBarColor,
                   elevation: 0,
-                  centerTitle: true,
-                  title: Text(title!, style: TextStyle(color: fg)),
+                  centerTitle: centerTitle ?? true,
+                  title: titleWidget ??
+                      (title != null
+                          ? Text(title!, style: TextStyle(color: fg))
+                          : null),
+                  titleTextStyle: Theme.of(context).textTheme.titleLarge?.copyWith(color: fg),
+                  toolbarTextStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(color: fg),
+                  actions: actions,
+                  leading: leading,
+                  bottom: appBarBottom,
                   iconTheme: IconThemeData(color: fg),
                   actionsIconTheme: IconThemeData(color: fg),
                 ),

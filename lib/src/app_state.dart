@@ -7,6 +7,7 @@ class AppState extends ChangeNotifier {
   static const _kBgColor = 'bg_color';
   static const _kFavs = 'favorites_json';
   static const _kLastCategory = 'last_category';
+  static const _kOnboarding = 'onboarding_done_v1';
 
   Color color;
 
@@ -16,6 +17,8 @@ class AppState extends ChangeNotifier {
 
   // last used category
   String? _lastCategoryName;
+
+  bool _onboardingComplete = false;
 
   AppState._({
     required this.color,
@@ -34,6 +37,7 @@ class AppState extends ChangeNotifier {
     if (colorInt != null) color = Color(colorInt);
 
     _lastCategoryName = prefs.getString(_kLastCategory);
+    _onboardingComplete = prefs.getBool(_kOnboarding) ?? false;
     final favStr = prefs.getString(_kFavs);
     if (favStr != null && favStr.isNotEmpty) {
       try {
@@ -117,6 +121,20 @@ class AppState extends ChangeNotifier {
     _lastCategoryName = null;
     _saveLastCategory();
     notifyListeners();
+  }
+
+  bool get needsOnboarding => !_onboardingComplete;
+
+  void markOnboardingSeen() {
+    if (_onboardingComplete) return;
+    _onboardingComplete = true;
+    _saveOnboarding();
+    notifyListeners();
+  }
+
+  Future<void> _saveOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kOnboarding, _onboardingComplete);
   }
 
   // Contrast helpers

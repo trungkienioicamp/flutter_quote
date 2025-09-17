@@ -95,28 +95,59 @@ class QuoteService {
   }
 
   Quote localQuote(Category? category) {
-    if (category == null) {
-      final m = localQuotes[_rng.nextInt(localQuotes.length)];
-      return Quote(m['text'] ?? '',
-          (m['author']?.isEmpty ?? true) ? 'Unknown' : m['author']!, 'Local');
+    final picks = localQuotesForCategory(category, limit: 1);
+    if (picks.isEmpty) {
+      return const Quote('No offline quotes available yet.', 'Unknown', 'Local');
     }
+    return picks.first;
+  }
 
-    final hits = <Map<String, String>>[];
-    final keys = category.keywords.map((e) => e.toLowerCase()).toList();
-    for (final m in localQuotes) {
+  List<Quote> localQuotesForCategory(Category? category, {int limit = 30}) {
+    final entries = List<Map<String, String>>.of(_localEntriesFor(category));
+    if (entries.isEmpty) return const [];
+    entries.shuffle(_rng);
+    final slice = entries.take(limit).map(_mapToQuote).toList();
+    return slice;
+  }
+
+  List<Quote> searchLocalQuotes(String query,
+      {Category? category, int limit = 60}) {
+    final search = query.trim().toLowerCase();
+    if (search.isEmpty) return const [];
+    final entries = _localEntriesFor(category);
+    final results = <Quote>[];
+    for (final m in entries) {
       final text = (m['text'] ?? '').toLowerCase();
-      if (keys.any((k) => text.contains(k))) {
-        hits.add(m);
+      final author = (m['author'] ?? '').toLowerCase();
+      if (text.contains(search) || author.contains(search)) {
+        results.add(_mapToQuote(m));
+        if (results.length >= limit) break;
       }
     }
-    if (hits.isEmpty) {
-      final m = localQuotes[_rng.nextInt(localQuotes.length)];
-      return Quote(m['text'] ?? '',
-          (m['author']?.isEmpty ?? true) ? 'Unknown' : m['author']!, 'Local');
+    return results;
+  }
+
+  Iterable<Map<String, String>> allLocalEntries() => localQuotes;
+
+  Iterable<Map<String, String>> _localEntriesFor(Category? category) {
+    if (category == null) {
+      return localQuotes;
     }
-    final pick = hits[_rng.nextInt(hits.length)];
-    return Quote(pick['text'] ?? '',
-        (pick['author']?.isEmpty ?? true) ? 'Unknown' : pick['author']!, 'Local');
+    final keys = category.keywords.map((e) => e.toLowerCase()).toList();
+    final hits = localQuotes.where((m) {
+      final text = (m['text'] ?? '').toLowerCase();
+      return keys.any((k) => text.contains(k));
+    }).toList();
+    if (hits.isEmpty) {
+      return localQuotes;
+    }
+    return hits;
+  }
+
+  Quote _mapToQuote(Map<String, String> m) {
+    final text = (m['text'] ?? '').trim();
+    final author = (m['author'] ?? '').trim();
+    return Quote(text, author.isEmpty ? 'Unknown' : author, 'Local');
   }
 
   Future<void> _refillFromZenQuotes(List<Quote> pool) async {

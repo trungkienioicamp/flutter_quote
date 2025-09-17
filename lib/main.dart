@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:showcaseview/showcaseview.dart';
 
 import 'src/app_state.dart';
 import 'src/categories.dart';
 import 'src/quote_service.dart';
+import 'src/discover_page.dart';
+import 'src/pages/quote_page.dart';
 import 'src/widgets/themed_scaffold.dart';
 import 'src/backgrounds.dart';
 
@@ -27,7 +30,8 @@ class QuoteApp extends StatelessWidget {
     return Consumer<AppState>(
       builder: (context, app, _) {
         final isDark = app.isDark;
-        final scheme = isDark ? const ColorScheme.dark() : const ColorScheme.light();
+        final scheme =
+            isDark ? const ColorScheme.dark() : const ColorScheme.light();
         return MaterialApp(
           title: 'Quotes',
           theme: ThemeData(
@@ -52,241 +56,89 @@ class RootScreen extends StatefulWidget {
 class _RootScreenState extends State<RootScreen> {
   int _index = 0;
   final _svc = QuoteService();
+  final GlobalKey _searchKey = GlobalKey();
+  final GlobalKey _categoryKey = GlobalKey();
+  final GlobalKey _favoritesKey = GlobalKey();
+  bool _showcaseScheduled = false;
+
+  void _setIndex(int value) {
+    if (_index == value) return;
+    setState(() => _index = value);
+  }
+
+  void _maybeStartShowcase(BuildContext showCaseContext) {
+    if (_showcaseScheduled) return;
+    final app = context.read<AppState>();
+    if (!app.needsOnboarding) return;
+    _showcaseScheduled = true;
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      ShowCaseWidget.of(showCaseContext).startShowCase([
+        _searchKey,
+        _categoryKey,
+        _favoritesKey,
+      ]);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
-      QuotePage(service: _svc, category: null, title: 'Random Quote'),
+      DiscoverPage(
+        service: _svc,
+        searchShowcaseKey: _searchKey,
+        firstCategoryShowcaseKey: _categoryKey,
+        onOpenFavorites: () => _setIndex(2),
+        onOpenCategories: () => _setIndex(1),
+        onCategoryDeepDive: (_) => _setIndex(1),
+      ),
       CategoryTab(service: _svc),
-      const FavoritesPage(),
+      FavoritesPage(service: _svc, onOpenDiscover: () => _setIndex(0)),
       const SettingsPage(),
     ];
 
-    return ThemedScaffold(
-      // no title -> no AppBar
-      title: null,
-      body: IndexedStack(index: _index, children: pages),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.category_outlined),
-            selectedIcon: Icon(Icons.category),
-            label: 'Category',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.star_border),
-            selectedIcon: Icon(Icons.star),
-            label: 'Favourite',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Setting',
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Reusable quote viewer page with swipe gestures and navigation controls.
-/// If [category] is null => Home (Random).
-class QuotePage extends StatefulWidget {
-  final QuoteService service;
-  final Category? category;
-  final String? title;
-
-  const QuotePage({
-    super.key,
-    required this.service,
-    required this.category,
-    this.title,
-  });
-
-  @override
-  State<QuotePage> createState() => _QuotePageState();
-}
-
-class _QuotePageState extends State<QuotePage> {
-  final List<Quote> _history = [];
-  int _cursor = -1; // index of current quote in history
-  bool _loading = true;
-  String? _hint;
-  int _swipeDir = 1; // 1 = up/next, -1 = down/prev
-
-  Quote? get _current =>
-      (_cursor >= 0 && _cursor < _history.length) ? _history[_cursor] : null;
-
-  @override
-  void initState() {
-    super.initState();
-    // persist last used category (if any)
-    if (widget.category != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.read<AppState>().setLastCategory(widget.category!.name);
-      });
-    }
-    Future.microtask(() async {
-      await widget.service.prefetch(widget.category, desired: 10);
-      if (!mounted) return;
-      _loadNext(initial: true);
-    });
-  }
-
-  Future<void> _loadNext({bool initial = false}) async {
-    setState(() {
-      _loading = true;
-      if (!initial) {
-        _hint = null;
-        _swipeDir = 1;
-      }
-    });
-
-    try {
-      // If user had gone back, allow forward navigation through history
-      if (_cursor < _history.length - 1) {
-        setState(() {
-          _cursor++;
-        });
-      } else {
-        final q = await widget.service.next(widget.category);
-        setState(() {
-          _history.add(q);
-          _cursor = _history.length - 1;
-        });
-      }
-    } on Cooldown catch (c) {
-      setState(() => _hint = 'Easy 🙂 Try again in ~${c.remaining.inSeconds.clamp(1, 9)}s');
-    } catch (_) {
-      final q = widget.service.localQuote(widget.category);
-      setState(() {
-        _history.add(q);
-        _cursor = _history.length - 1;
-        _hint = 'Network issue — showing a local quote.';
-      });
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  void _goPrev() {
-    if (_cursor > 0) {
-      setState(() {
-        _swipeDir = -1;
-        _cursor--;
-      });
-    } else {
-      ScaffoldMessenger.of(context)
-        ..clearSnackBars()
-        ..showSnackBar(const SnackBar(content: Text('No previous quote')));
-    }
-  }
-
-  void _onVerticalEnd(DragEndDetails d) {
-    final vy = d.primaryVelocity ?? 0;
-    if (vy < -200) {
-      // swipe up -> next
-      _loadNext();
-    } else if (vy > 200) {
-      // swipe down -> prev
-      _goPrev();
-    }
-  }
-
-  void _shareCurrent() async {
-    final q = _current;
-    if (q == null) return;
-    final text = '“${q.content}” — ${q.author}';
-    try {
-      await Share.share(text, subject: 'Quote');
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sharing is not supported on this platform/browser')),
-      );
-    }
-  }
-
-  void _toggleFavorite(AppState app) {
-    final q = _current;
-    if (q == null) return;
-    app.toggleFavorite(q);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final textColor = app.foreground;
-    final isFav = _current != null && app.isFavorite(_current!);
-
-    final bodyChild = _loading
-        ? const Center(child: CircularProgressIndicator())
-        : _current == null
-            ? _EmptyState(onRetry: _loadNext)
-            : _QuoteView(
-                key: ValueKey('q$_cursor'),
-                quote: _current!,
-                hint: _hint,
-                textColor: textColor,
-                onShare: _shareCurrent,
-                isFavorite: isFav,
-                onToggleFavorite: () => _toggleFavorite(app),
-              );
-    return ThemedScaffold(
-      // no title -> no AppBar
-      title: null,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          GestureDetector(
-            onVerticalDragEnd: _onVerticalEnd,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              transitionBuilder: (child, anim) {
-                final beginOffset = Offset(0, _swipeDir == 1 ? 1 : -1);
-                final tween = Tween<Offset>(begin: beginOffset, end: Offset.zero)
-                    .chain(CurveTween(curve: Curves.easeOutCubic))
-                    .animate(anim);
-                return SlideTransition(position: tween, child: child);
-              },
-              child: bodyChild,
-            ),
-          ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 24),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  FilledButton.tonalIcon(
-                    onPressed:
-                        (!_loading && _cursor > 0) ? _goPrev : null,
-                    icon: const Icon(Icons.arrow_back),
-                    label: const Text('Prev'),
+    return ShowCaseWidget(
+      onFinish: () => context.read<AppState>().markOnboardingSeen(),
+      builder: Builder(
+        builder: (showcaseContext) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _maybeStartShowcase(showcaseContext);
+          });
+          return ThemedScaffold(
+            title: null,
+            body: IndexedStack(index: _index, children: pages),
+            bottomNavigationBar: NavigationBar(
+              selectedIndex: _index,
+              onDestinationSelected: (i) => setState(() => _index = i),
+              destinations: [
+                const NavigationDestination(
+                  icon: Icon(Icons.explore_outlined),
+                  selectedIcon: Icon(Icons.explore),
+                  label: 'Discover',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.category_outlined),
+                  selectedIcon: Icon(Icons.category),
+                  label: 'Categories',
+                ),
+                NavigationDestination(
+                  icon: Showcase(
+                    key: _favoritesKey,
+                    description: 'View every quote you have saved for later.',
+                    child: const Icon(Icons.star_border),
                   ),
-                  const SizedBox(width: 12),
-                  FilledButton.icon(
-                    onPressed: _loading
-                        ? null
-                        : () {
-                            _loadNext();
-                          },
-                    icon: const Icon(Icons.arrow_forward),
-                    label: const Text('Next'),
-                  ),
-                ],
-              ),
+                  selectedIcon: const Icon(Icons.star),
+                  label: 'Favourites',
+                ),
+                const NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: 'Settings',
+                ),
+              ],
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -306,7 +158,6 @@ class CategoryTab extends StatelessWidget {
         : null;
 
     return ThemedScaffold(
-      // no title -> no AppBar
       title: null,
       body: ListView(
         padding: const EdgeInsets.all(16),
@@ -314,6 +165,7 @@ class CategoryTab extends StatelessWidget {
           if (last != null) ...[
             InkWell(
               onTap: () {
+                context.read<AppState>().setLastCategory(last.name);
                 unawaited(service.prefetch(last, desired: 10));
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -338,8 +190,11 @@ class CategoryTab extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Last used: ${last.name}',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor),
+                        'Last opened: ${last.name}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: textColor),
                       ),
                     ),
                     Icon(Icons.arrow_forward, color: textColor),
@@ -387,17 +242,22 @@ class CategoryTab extends StatelessWidget {
                     children: [
                       Icon(c.icon, size: 40, color: textColor),
                       const SizedBox(height: 8),
-                      Text(c.name,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(color: textColor)),
+                      Text(
+                        c.name,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: textColor),
+                      ),
                       const SizedBox(height: 4),
-                      Text(c.subtitle,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: textColor.withOpacity(0.8))),
+                      Text(
+                        c.subtitle,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: textColor.withOpacity(0.8)),
+                      ),
                     ],
                   ),
                 ),
@@ -410,145 +270,31 @@ class CategoryTab extends StatelessWidget {
   }
 }
 
-class _QuoteView extends StatelessWidget {
-  final Quote quote;
-  final String? hint;
-  final Color textColor;
-  final VoidCallback onShare;
-  final VoidCallback onToggleFavorite;
-  final bool isFavorite;
-
-  const _QuoteView({
-    super.key,
-    required this.quote,
-    this.hint,
-    required this.textColor,
-    required this.onShare,
-    required this.onToggleFavorite,
-    required this.isFavorite,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        child: Column(
-          key: const ValueKey('quote'),
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (hint != null) ...[
-              Text(hint!,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: textColor.withOpacity(0.9),
-                  )),
-              const SizedBox(height: 8),
-            ],
-            Icon(Icons.format_quote, size: 48, color: textColor),
-            const SizedBox(height: 12),
-            Text(
-              quote.content,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontStyle: FontStyle.italic,
-                height: 1.4,
-                color: textColor,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '— ${quote.author}',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium?.copyWith(color: textColor),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: 'Share',
-                  onPressed: onShare,
-                  icon: Icon(Icons.share, color: textColor),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: isFavorite ? 'Unstar' : 'Star',
-                  onPressed: onToggleFavorite,
-                  icon: Icon(
-                    isFavorite ? Icons.star : Icons.star_border,
-                    color: isFavorite ? Colors.amber : textColor,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  final VoidCallback onRetry;
-  const _EmptyState({required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    final textColor = context.select<AppState, Color>((s) => s.foreground);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.wifi_off, size: 48, color: textColor),
-            const SizedBox(height: 12),
-            Text('No quote yet',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(color: textColor)),
-            const SizedBox(height: 8),
-            Text(
-              'Use the arrows below to browse quotes.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: textColor),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try again'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// FAVOURITES PAGE
 class FavoritesPage extends StatelessWidget {
-  const FavoritesPage({super.key});
+  final QuoteService service;
+  final VoidCallback onOpenDiscover;
+  const FavoritesPage({
+    super.key,
+    required this.service,
+    required this.onOpenDiscover,
+  });
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final items = app.favorites;
     final textColor = app.foreground;
+    final suggestions = service.localQuotesForCategory(null, limit: 3);
 
     return ThemedScaffold(
       // no title -> no AppBar
       title: null,
       body: items.isEmpty
-          ? Center(
-              child: Text(
-                'No favourites yet.\nTap the star under a quote to save it.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: textColor),
-              ),
+          ? _FavoritesEmptyState(
+              textColor: textColor,
+              suggestions: suggestions,
+              onOpenDiscover: onOpenDiscover,
             )
           : ListView.separated(
               padding: const EdgeInsets.all(12),
@@ -568,12 +314,18 @@ class FavoritesPage extends StatelessWidget {
                     children: [
                       Text(
                         '“${q.content}”',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(color: textColor),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(color: textColor),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         '— ${q.author}',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: textColor.withOpacity(0.9)),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: textColor.withOpacity(0.9)),
                       ),
                       const SizedBox(height: 6),
                       Row(
@@ -588,7 +340,9 @@ class FavoritesPage extends StatelessWidget {
                               } catch (_) {
                                 if (!context.mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Sharing is not supported on this platform/browser')),
+                                  const SnackBar(
+                                      content: Text(
+                                          'Sharing is not supported on this platform/browser')),
                                 );
                               }
                             },
@@ -613,6 +367,87 @@ class FavoritesPage extends StatelessWidget {
   }
 }
 
+class _FavoritesEmptyState extends StatelessWidget {
+  final Color textColor;
+  final List<Quote> suggestions;
+  final VoidCallback onOpenDiscover;
+
+  const _FavoritesEmptyState({
+    required this.textColor,
+    required this.suggestions,
+    required this.onOpenDiscover,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Text(
+              'Save quotes you love',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(color: textColor),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Tap the star icon on any quote to store it here. Here are a few to get you started:',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: textColor.withOpacity(0.9)),
+            ),
+            const SizedBox(height: 16),
+            if (suggestions.isEmpty)
+              Text(
+                'Offline samples unavailable — browse Discover to load fresh quotes.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: textColor.withOpacity(0.9)),
+              )
+            else
+              for (final quote in suggestions)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '“${quote.content}”',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyLarge
+                            ?.copyWith(color: textColor, height: 1.35),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '— ${quote.author}',
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyMedium
+                            ?.copyWith(color: textColor.withOpacity(0.85)),
+                      ),
+                    ],
+                  ),
+                ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: onOpenDiscover,
+              icon: const Icon(Icons.explore),
+              label: const Text('Discover quotes'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// SETTINGS (Color-only)
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -627,7 +462,10 @@ class SettingsPage extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           Text('Background Color',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: app.foreground)),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: app.foreground)),
           const SizedBox(height: 12),
           _ColorGrid(
             colors: kWarmColors,
@@ -636,11 +474,17 @@ class SettingsPage extends StatelessWidget {
           ),
           const SizedBox(height: 28),
           Text('Last used category',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: app.foreground)),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: app.foreground)),
           const SizedBox(height: 8),
           Text(
             app.lastCategoryName ?? 'None',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: app.foreground),
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: app.foreground),
           ),
           const SizedBox(height: 6),
           Row(
@@ -655,7 +499,10 @@ class SettingsPage extends StatelessWidget {
           ),
           const SizedBox(height: 28),
           Text('Preview',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: app.foreground)),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(color: app.foreground)),
           const SizedBox(height: 12),
           SizedBox(
             height: 180,
@@ -666,7 +513,10 @@ class SettingsPage extends StatelessWidget {
                 child: Text(
                   '“The only way out is through.”\n— Robert Frost',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: app.foreground),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(color: app.foreground),
                 ),
               ),
             ),
@@ -704,7 +554,8 @@ class _ColorGrid extends StatelessWidget {
                 color: c,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: selected.value == c.value ? Colors.white : Colors.black26,
+                  color:
+                      selected.value == c.value ? Colors.white : Colors.black26,
                   width: selected.value == c.value ? 3 : 1,
                 ),
                 boxShadow: kElevationToShadow[1],
