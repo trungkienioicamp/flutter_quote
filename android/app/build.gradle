@@ -33,7 +33,7 @@ apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
 
 android {
     namespace "com.trungkienioicamp.flutter.quotely"
-    compileSdkVersion flutter.compileSdkVersion
+    compileSdkVersion 35
     ndkVersion "29.0.14033849"
 
     compileOptions {
@@ -53,7 +53,7 @@ android {
         applicationId "com.trungkienioicamp.flutter.quotely"
         // share_plus & many plugins require 21+
         minSdkVersion 21
-        targetSdkVersion flutter.targetSdkVersion
+        targetSdkVersion 35
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
