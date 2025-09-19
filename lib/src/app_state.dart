@@ -19,6 +19,7 @@ class AppState extends ChangeNotifier {
   String? _lastCategoryName;
 
   bool _onboardingComplete = false;
+  bool _prefsLoaded = false;
 
   AppState._({
     required this.color,
@@ -56,6 +57,7 @@ class AppState extends ChangeNotifier {
           ..addAll(_favorites.map(_keyFor));
       } catch (_) {}
     }
+    _prefsLoaded = true;
     notifyListeners();
   }
 
@@ -123,7 +125,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get needsOnboarding => !_onboardingComplete;
+  bool get needsOnboarding => _prefsLoaded && !_onboardingComplete;
 
   void markOnboardingSeen() {
     if (_onboardingComplete) return;
@@ -144,6 +146,16 @@ class AppState extends ChangeNotifier {
   }
 
   Color get foreground => isDark ? Colors.white : Colors.black87;
+
+  Color get surfaceColor {
+    final hsl = HSLColor.fromColor(color);
+    final delta = isDark ? 0.18 : -0.08;
+    final adjustedLightness = (hsl.lightness + delta).clamp(0.05, 0.95);
+    return hsl.withLightness(adjustedLightness).toColor();
+  }
+
+  Color get surfaceForeground =>
+      surfaceColor.computeLuminance() < 0.5 ? Colors.white : Colors.black87;
 
   static String _keyFor(Quote q) =>
       '${q.content.trim().toLowerCase()}|${q.author.trim().toLowerCase()}';

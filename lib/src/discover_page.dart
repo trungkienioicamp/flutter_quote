@@ -130,9 +130,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final textColor = app.foreground;
-
     if (!_ready) {
       return const ThemedScaffold(
         title: 'Discover',
@@ -170,7 +167,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
             _DailyQuoteCard(
               quote: _quoteOfTheDay,
               onReadMore: _openQuoteReader,
-              textColor: textColor,
             ),
             const SizedBox(height: 24),
             _SectionHeader(
@@ -216,19 +212,21 @@ class _DiscoverPageState extends State<DiscoverPage> {
 class _DailyQuoteCard extends StatelessWidget {
   final Quote quote;
   final ValueChanged<Quote?> onReadMore;
-  final Color textColor;
 
   const _DailyQuoteCard({
     required this.quote,
     required this.onReadMore,
-    required this.textColor,
   });
 
   @override
   Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final textColor = app.surfaceForeground;
+    final cardColor = app.surfaceColor;
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       elevation: 1,
+      color: cardColor,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -278,7 +276,7 @@ class _DailyQuoteCard extends StatelessWidget {
                       );
                     }
                   },
-                  icon: const Icon(Icons.share_outlined),
+                  icon: Icon(Icons.share_outlined, color: textColor),
                 ),
               ],
             ),
@@ -297,8 +295,6 @@ class _QuoteCarousel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
-    final textColor = app.foreground;
     return SizedBox(
       height: 210,
       child: ListView.separated(
@@ -309,8 +305,7 @@ class _QuoteCarousel extends StatelessWidget {
           final quote = quotes[index];
           return SizedBox(
             width: 260,
-            child: _QuoteCard(
-                quote: quote, service: service, textColor: textColor),
+            child: _QuoteCard(quote: quote, service: service),
           );
         },
       ),
@@ -321,21 +316,22 @@ class _QuoteCarousel extends StatelessWidget {
 class _QuoteCard extends StatelessWidget {
   final Quote quote;
   final QuoteService service;
-  final Color textColor;
 
   const _QuoteCard({
     required this.quote,
     required this.service,
-    required this.textColor,
   });
 
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final isFav = app.isFavorite(quote);
+    final textColor = app.surfaceForeground;
+    final cardColor = app.surfaceColor;
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       elevation: 1,
+      color: cardColor,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -363,7 +359,7 @@ class _QuoteCard extends StatelessWidget {
               children: [
                 IconButton(
                   tooltip: 'Share',
-                  icon: const Icon(Icons.share_outlined),
+                  icon: Icon(Icons.share_outlined, color: textColor),
                   onPressed: () async {
                     try {
                       await Share.share('“${quote.content}” — ${quote.author}');
@@ -410,6 +406,9 @@ class _CategoryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final tileColor = app.surfaceColor.withOpacity(app.isDark ? 0.6 : 0.9);
+    final textColor = app.surfaceForeground;
     return SizedBox(
       height: 160,
       child: ListView.separated(
@@ -424,7 +423,7 @@ class _CategoryStrip extends StatelessWidget {
             child: Container(
               width: 200,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.05),
+                color: tileColor,
                 borderRadius: BorderRadius.circular(18),
               ),
               padding: const EdgeInsets.all(16),
@@ -433,13 +432,15 @@ class _CategoryStrip extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(category.icon,
-                          color: Theme.of(context).colorScheme.primary),
+                      Icon(category.icon, color: textColor),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           category.name,
-                          style: Theme.of(context).textTheme.titleMedium,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(color: textColor),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -454,7 +455,7 @@ class _CategoryStrip extends StatelessWidget {
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
-                        ?.copyWith(color: Colors.black87.withOpacity(0.7)),
+                        ?.copyWith(color: textColor.withOpacity(0.7)),
                   ),
                 ],
               ),
@@ -497,7 +498,8 @@ class _AuthorSpotlightList extends StatelessWidget {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     final app = context.watch<AppState>();
-    final textColor = app.foreground;
+    final textColor = app.surfaceForeground;
+    final cardColor = app.surfaceColor;
     return Column(
       children: [
         for (final spotlight in spotlights)
@@ -505,11 +507,17 @@ class _AuthorSpotlightList extends StatelessWidget {
             margin: const EdgeInsets.only(bottom: 12),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            color: cardColor,
             child: ListTile(
               title: Text(spotlight.author,
                   style: textTheme.titleMedium?.copyWith(color: textColor)),
-              subtitle: Text('${spotlight.total} quotes in library'),
-              trailing: const Icon(Icons.chevron_right),
+              subtitle: Text(
+                '${spotlight.total} quotes in library',
+                style: textTheme.bodySmall?.copyWith(
+                  color: textColor.withOpacity(0.8),
+                ),
+              ),
+              trailing: Icon(Icons.chevron_right, color: textColor),
               onTap: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -548,7 +556,6 @@ class _AuthorQuotesPage extends StatelessWidget {
       deduped.putIfAbsent('${quote.content}|${quote.author}', () => quote);
     }
     final list = deduped.values.toList();
-    final textColor = context.watch<AppState>().foreground;
     return ThemedScaffold(
       title: author,
       body: ListView.separated(
@@ -558,7 +565,6 @@ class _AuthorQuotesPage extends StatelessWidget {
         itemBuilder: (context, index) => _QuoteCard(
           quote: list[index],
           service: service,
-          textColor: textColor,
         ),
       ),
     );

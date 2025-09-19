@@ -34,7 +34,6 @@ class ThemedScaffold extends StatelessWidget {
     final bgColor = app.color;
     final isDark = app.isDark;
     final fg = app.foreground;
-
     final appBarColor =
         isDark ? Colors.black.withOpacity(0.2) : Colors.white.withOpacity(0.35);
 
@@ -50,7 +49,11 @@ class ThemedScaffold extends StatelessWidget {
         // Foreground scaffold
         Scaffold(
           backgroundColor: Colors.transparent,
-          appBar: title == null && titleWidget == null && actions == null && leading == null && appBarBottom == null
+          appBar: title == null &&
+                  titleWidget == null &&
+                  actions == null &&
+                  leading == null &&
+                  appBarBottom == null
               ? null
               : AppBar(
                   backgroundColor: appBarColor,
@@ -60,8 +63,14 @@ class ThemedScaffold extends StatelessWidget {
                       (title != null
                           ? Text(title!, style: TextStyle(color: fg))
                           : null),
-                  titleTextStyle: Theme.of(context).textTheme.titleLarge?.copyWith(color: fg),
-                  toolbarTextStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(color: fg),
+                  titleTextStyle: Theme.of(context)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(color: fg),
+                  toolbarTextStyle: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(color: fg),
                   actions: actions,
                   leading: leading,
                   bottom: appBarBottom,

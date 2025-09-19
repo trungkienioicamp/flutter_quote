@@ -129,9 +129,11 @@ class _ResultTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
     final isFav = app.isFavorite(quote);
-    final textColor = app.foreground;
+    final textColor = app.surfaceForeground;
+    final cardColor = app.surfaceColor;
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: cardColor,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -170,7 +172,8 @@ class _ResultTile extends StatelessWidget {
                       ),
                     );
                   },
-                  icon: const Icon(Icons.chrome_reader_mode_outlined),
+                  icon:
+                      Icon(Icons.chrome_reader_mode_outlined, color: textColor),
                 ),
                 IconButton(
                   tooltip: 'Share',
@@ -186,7 +189,7 @@ class _ResultTile extends StatelessWidget {
                       );
                     }
                   },
-                  icon: const Icon(Icons.share_outlined),
+                  icon: Icon(Icons.share_outlined, color: textColor),
                 ),
                 IconButton(
                   tooltip:
